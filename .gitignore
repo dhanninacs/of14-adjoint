@@ -1,0 +1,5 @@
+# wmake output
+**/lnInclude/
+**/Make/linux*/
+bin/*.exe
+bin/*.dll

@@ -1,0 +1,24 @@
+// of14-adjoint: system/adjointDict, every entry optional.
+
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    object      adjointDict;
+}
+
+// The Foundation solver's topology update (alpha, lambda and alphaMax in physicalProperties).
+// Off: a primal and adjoint solve for shape sensitivity only.
+porosity    false;
+
+// Write shapeSensitivity on the walls and log the objective each iteration.
+sensitivity true;
+
+// The adjoint transpose convection (ESI's ATCModel, see ATC.H).
+ATC
+{
+    type                UaGradU;    // UaGradU (the Foundation form) | standard | cancel
+    zeroATCPatchTypes   ();         // e.g. (patch): zero ATC next to inlets and outlets
+    nSmooth             0;          // smoothing passes of that mask
+    extraConvection     0;          // implicit adjoint convection added, for robustness
+}
