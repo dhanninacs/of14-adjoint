@@ -60,13 +60,58 @@
     {
         const volScalarField nuEff(turbulence->nuEff());
         volScalarField::Boundary& sb = shapeSensitivity.boundaryFieldRef();
-        forAll(mesh.boundary(), patchi)
+        if (!sensitivityCorrected)
         {
-            if (isA<wallFvPatch>(mesh.boundary()[patchi]))
+            forAll(mesh.boundary(), patchi)
             {
-                sb[patchi] =
-                    nuEff.boundaryField()[patchi]
-                   *(U.boundaryField()[patchi].snGrad() & Ua.boundaryField()[patchi].snGrad());
+                if (isA<wallFvPatch>(mesh.boundary()[patchi]))
+                {
+                    sb[patchi] =
+                        nuEff.boundaryField()[patchi]
+                       *(U.boundaryField()[patchi].snGrad() & Ua.boundaryField()[patchi].snGrad());
+                }
+            }
+        }
+        else
+        {
+            // The wall gradient along the face normal. The boundary snGrad is
+            // (X_w - X_c)/(n & d) with d from the cell centre to the face centre: on a
+            // non-orthogonal wall cell (snapped, or a body-fitted slope) the centre lies off
+            // the normal by k = d - n (n & d), so the difference is not taken along n. Here
+            // the cell value is moved to the foot of the normal with the cell gradient first
+            // (adjointControls.H).
+            const volTensorField gradU(fvc::grad(U));
+            const volTensorField gradUa(fvc::grad(Ua));
+            forAll(mesh.boundary(), patchi)
+            {
+                const fvPatch& patch = mesh.boundary()[patchi];
+                if (isA<wallFvPatch>(patch))
+                {
+                    const vectorField nf(patch.nf());
+                    // Not patch.delta(): Foundation's is already the normal part,
+                    // nf (nf & (Cf - Cn)), so boundary snGrad divides by n & d and
+                    // ignores the tangential offset k.
+                    const vectorField d(patch.Cf() - patch.Cn());
+                    const scalarField nd(max(nf & d, small*mag(d)));
+                    const vectorField k(d - nf*(nf & d));
+                    const fvPatchVectorField& Up = U.boundaryField()[patchi];
+                    const fvPatchVectorField& Uap = Ua.boundaryField()[patchi];
+                    const vectorField snU
+                    (
+                        (
+                            Up - Up.patchInternalField()
+                          - (k & gradU.boundaryField()[patchi].patchInternalField())
+                        )/nd
+                    );
+                    const vectorField snUa
+                    (
+                        (
+                            Uap - Uap.patchInternalField()
+                          - (k & gradUa.boundaryField()[patchi].patchInternalField())
+                        )/nd
+                    );
+                    sb[patchi] = nuEff.boundaryField()[patchi]*(snU & snUa);
+                }
             }
         }
     }

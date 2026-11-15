@@ -19,6 +19,26 @@ IOdictionary adjointDict
 
 const bool porosity = adjointDict.lookupOrDefault<Switch>("porosity", false);
 
+// The wall gradient in shapeSensitivity (shapeSensitivity.H): "uncorrected" is OpenFOAM's
+// boundary snGrad, (X_w - X_c)/(n & d) (the pressure-loss path, unchanged); "corrected" first
+// moves the cell value to the foot of the face normal with the cell gradient, for
+// non-orthogonal wall cells. The default is set by objective.H.
+word sensitivityWallGradient
+(
+    adjointDict.lookupOrDefault<word>("sensitivityWallGradient", "default")
+);
+if
+(
+    sensitivityWallGradient != "default"
+ && sensitivityWallGradient != "uncorrected"
+ && sensitivityWallGradient != "corrected"
+)
+{
+    FatalIOErrorInFunction(adjointDict)
+        << "sensitivityWallGradient " << sensitivityWallGradient
+        << "; use uncorrected or corrected" << exit(FatalIOError);
+}
+
 // The inlets: every patch that is not a wall or a constraint and on which U is fixed by a plain
 // fixed-value condition. The Foundation solver looked for a patch called "inlet" by name.
 // **Mixed conditions are not inlets**: an outlet's inletOutlet reports fixesValue() too, and

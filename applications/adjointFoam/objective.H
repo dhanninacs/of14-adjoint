@@ -9,6 +9,9 @@
 //         viscousTerm      true;                // nuEff d(Ua_n)/dn in the outlet pa
 //         tangential       robin;               // robin | zero  (outlet Ua_t)
 //         startIteration   0;                   // the outlet source is held at 0 before this
+//         convection       fvSchemes;           // or a scheme, e.g. bounded Gauss linearUpwind
+//                                               // grad(Ua); fvSchemes: the case's div(-phi,Ua)
+//         ATCInlets        legacy;              // legacy | strict (ATC kept in outlet cells)
 //     }
 //
 // ptLosses (or no block): the Foundation solver's total-pressure loss, unchanged; the case uses
@@ -37,6 +40,26 @@ scalarField objectiveTargets;
 bool objectiveViscous = true;
 bool objectiveRobin = true;
 label objectiveStart = 0;
+
+// The adjoint convection scheme of the objective path (adjointFoam.C), e.g.
+// "bounded Gauss linearUpwind grad(Ua)"; the default, "fvSchemes", is the case's own
+// div(-phi,Ua). linearUpwind lowered the snapped T-junction's error by 3 to 10 % but did not
+// make R2 converge, so it is not the default (tests/flowsplit.md, Phase B). The pressure-loss
+// path always uses fvSchemes.
+string objectiveConvection("fvSchemes");
+
+// The wall gradient of shapeSensitivity (adjointControls.H): uncorrected unless asked for, on
+// both paths. Corrected fixed the body-fitted T-junction but made the snapped one worse
+// (tests/flowsplit.md, Phase B).
+if (sensitivityWallGradient == "default")
+{
+    sensitivityWallGradient = "uncorrected";
+}
+const bool sensitivityCorrected = (sensitivityWallGradient == "corrected");
+if (flowRatePartition || sensitivityCorrected)
+{
+    Info<< "shapeSensitivity wall gradient: " << sensitivityWallGradient << nl << endl;
+}
 
 // The values of the last update (objectiveUpdate.H), logged by shapeSensitivity.H.
 scalar objectiveJ = 0;
@@ -106,6 +129,35 @@ if (flowRatePartition)
     }
     objectiveRobin = (tangential == "robin");
     objectiveStart = objectiveDict.lookupOrDefault<label>("startIteration", 0);
+    // Written as in fvSchemes (convection bounded Gauss linearUpwind grad(Ua);), quoted or not.
+    if (objectiveDict.found("convection"))
+    {
+        ITstream& is = objectiveDict.lookup("convection");
+        if (is.size() == 1 && is[0].isWord())
+        {
+            objectiveConvection = is[0].wordToken();
+        }
+        else if (is.size() == 1 && is[0].isString())
+        {
+            objectiveConvection = is[0].stringToken();
+        }
+        else
+        {
+            OStringStream os;
+            forAll(is, i)
+            {
+                os << (i ? " " : "") << is[i];
+            }
+            objectiveConvection = os.str();
+        }
+    }
+    if (objectiveConvection != "fvSchemes")
+    {
+        // Fail at start-up on a scheme that does not parse.
+        const surfaceScalarField phiNeg("-phi", -phi);
+        IStringStream schemeData(objectiveConvection);
+        fv::convectionScheme<vector>::New(mesh, phiNeg, schemeData);
+    }
 
     // The outlets must carry the two conditions this objective drives.
     forAll(objectiveOutlets, i)
@@ -161,6 +213,54 @@ if (flowRatePartition)
         }
     }
 
+    // The ATC limiter's inlet cells (ATC.H): "legacy" keeps adjointControls.H's rule, which also
+    // counts an outlet's pressureInletOutletVelocity (directionMixed) as an inlet and so zeroes
+    // the ATC in the outlet cells; "strict" zeroes it only next to the inlets found above.
+    const word ATCInlets(objectiveDict.lookupOrDefault<word>("ATCInlets", "legacy"));
+    if (ATCInlets != "legacy" && ATCInlets != "strict")
+    {
+        FatalIOErrorInFunction(objectiveDict)
+            << "ATCInlets " << ATCInlets << "; use legacy or strict" << exit(FatalIOError);
+    }
+    if (ATCInlets == "strict")
+    {
+        ATClimiter = dimensionedScalar(dimless, 1);
+        label nZeroed = 0;
+        forAll(mesh.boundary(), patchi)
+        {
+            const fvPatch& patch = mesh.boundary()[patchi];
+            const bool strictInlet =
+                !isA<wallFvPatch>(patch)
+             && !patch.constraint()
+             && findIndex(objectiveOutlets, patchi) == -1
+             && U.boundaryField()[patchi].fixesValue()
+             && !isA<mixedFvPatchVectorField>(U.boundaryField()[patchi])
+             && !isA<directionMixedFvPatchVectorField>(U.boundaryField()[patchi]);
+            if
+            (
+                strictInlet
+             || findIndex(zeroATCPatchTypes, word(patch.type())) != -1
+            )
+            {
+                for (const label celli : patch.faceCells())
+                {
+                    ATClimiter[celli] = 0;
+                    ++nZeroed;
+                }
+            }
+        }
+        ATClimiter.correctBoundaryConditions();
+        const localMin<scalar> limiterScheme(mesh);
+        for (label pass = 0; pass < ATCnSmooth; ++pass)
+        {
+            surfaceScalarField faceLimiter(limiterScheme.interpolate(ATClimiter));
+            ATClimiter = fvc::average(faceLimiter);
+            ATClimiter.correctBoundaryConditions();
+        }
+        Info<< "ATC limiter, strict inlets: zeroed in "
+            << returnReduce(nZeroed, sumOp<label>()) << " face cells" << nl << endl;
+    }
+
     objectiveFractions = scalarField(nOut, 0);
     objectiveDJdQ = scalarField(nOut, 0);
 
@@ -172,7 +272,14 @@ if (flowRatePartition)
     Info<< ", targets " << objectiveTargets
         << ", viscousTerm " << objectiveViscous
         << ", tangential " << tangential
-        << ", startIteration " << objectiveStart << nl << endl;
+        << ", startIteration " << objectiveStart
+        << ", adjoint convection "
+        << (
+               objectiveConvection == "fvSchemes"
+             ? string("fvSchemes div(-phi,Ua)")
+             : objectiveConvection
+           )
+        << nl << endl;
 }
 
 // The objective's output: postProcessing/adjoint/0/objective.dat, one row per iteration.

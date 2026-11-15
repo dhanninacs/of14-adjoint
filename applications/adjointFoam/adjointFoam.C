@@ -77,6 +77,9 @@ Description
 #include "objectiveOutletPressureFvPatchScalarField.H"
 #include "objectiveOutletVelocityFvPatchVectorField.H"
 
+#include "convectionScheme.H"
+#include "IStringStream.H"
+
 #include "fvcDdt.H"
 #include "fvcGrad.H"
 #include "fvcFlux.H"
@@ -239,9 +242,25 @@ int main(int argc, char *argv[])
             }
             ATC *= ATClimiter;
 
+            // of14-adjoint: the objective path's own adjoint convection
+            // scheme (objective.H); fvSchemes' div(-phi,Ua) otherwise.
+            const surfaceScalarField phiNeg("-phi", -phi);
+            tmp<fvVectorMatrix> tUaConvection;
+            if (flowRatePartition && objectiveConvection != "fvSchemes")
+            {
+                IStringStream schemeData(objectiveConvection);
+                tUaConvection =
+                    fv::convectionScheme<vector>::New(mesh, phiNeg, schemeData)()
+                   .fvmDiv(phiNeg, Ua);
+            }
+            else
+            {
+                tUaConvection = fvm::div(-phi, Ua);
+            }
+
             tmp<fvVectorMatrix> tUaEqn
             (
-                fvm::div(-phi, Ua)
+                tUaConvection
               + ATC
               + turbulence->divDevSigma(Ua)
               + fvm::Sp(alpha, Ua)
