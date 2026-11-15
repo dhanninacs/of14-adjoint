@@ -52,6 +52,10 @@ called verified. Every experiment is in [tests/flowsplit.md](tests/flowsplit.md)
 
 ![Adjoint gradient divided by central finite difference on the T-junction and the manifold](docs/images/adjoint-vs-finite-difference.png)
 
+The manifold itself, before and after (Stokes results view, laminar air, 1 mm mesh):
+
+![The manifold before and after optimisation, with streamlines and a velocity slice](docs/images/manifold-before-after.jpg)
+
 For scale, this is the optimisation the gradient is meant to serve: Stokes equalising the flow
 across the four outlets of a manifold by moving three branch heights. That run used finite-difference
 gradients (16 flow solves), not this adjoint; the worst outlet went from 2.27 points off an equal
