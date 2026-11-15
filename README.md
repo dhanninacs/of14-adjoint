@@ -42,6 +42,23 @@ Compared with the Foundation solver it starts from:
 
 Settings: `system/adjointDict`, every entry optional ([etc/adjointDict](etc/adjointDict)). The plan for the ESI merge, in order, is in [ROADMAP.md](ROADMAP.md).
 
+## How accurate is it
+
+The flow-rate objective's gradient points the right way but is not yet accurate in size. Against
+central finite differences of J, with the solver's own `shapeSensitivity`, the ratio is 1.14 to 1.24
+on a snapped T-junction and 0.75 to 0.81 on a four-outlet manifold (1.0 is exact; the grey bars are
+the reconstruction Stokes used before it read the solver's field). It is experimental and not
+called verified. Every experiment is in [tests/flowsplit.md](tests/flowsplit.md).
+
+![Adjoint gradient divided by central finite difference on the T-junction and the manifold](docs/images/adjoint-vs-finite-difference.png)
+
+For scale, this is the optimisation the gradient is meant to serve: Stokes equalising the flow
+across the four outlets of a manifold by moving three branch heights. That run used finite-difference
+gradients (16 flow solves), not this adjoint; the worst outlet went from 2.27 points off an equal
+split to 1.02 and J fell by 81 %, stopping at the 26 mm bound of the design variables.
+
+![Manifold flow-split optimisation: objective, design variables and outlet shares](docs/images/manifold-flow-split.png)
+
 ## Build
 
 ```bash
