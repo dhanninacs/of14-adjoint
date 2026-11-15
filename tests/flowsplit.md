@@ -130,7 +130,7 @@ setting changed: the primal, so J and the finite differences, is unchanged.
 |---|---|---|---|
 | `objective { convection ...; }` | an fvSchemes convection scheme, or `fvSchemes` | `fvSchemes` (the case's `div(-phi,Ua)`) | the objective path's adjoint convection scheme |
 | `objective { ATCInlets ...; }` | `legacy`, `strict` | `legacy` | `strict`: the ATC limiter is zeroed only next to the inlets objective.H finds, not in the outlet cells that `adjointControls.H` counts as inlets (hypothesis (c)) |
-| `sensitivityWallGradient` (top level) | `uncorrected`, `corrected` | `uncorrected` | `corrected`: the wall gradients in `shapeSensitivity` are taken along the face normal, the cell value moved to the foot of the normal with the cell gradient, (X_w - X_c - k.grad X_c)/(n.d), k = d - n(n.d), d = Cf - Cn (Foundation's `patch.delta()` is already n(n.d), so its boundary snGrad ignores k) |
+| `sensitivityWallGradient` (top level) | `uncorrected`, `corrected` (`leastSquares` added in Phase C) | `uncorrected` | `corrected`: the wall gradients in `shapeSensitivity` are taken along the face normal, the cell value moved to the foot of the normal with the cell gradient, (X_w - X_c - k.grad X_c)/(n.d), k = d - n(n.d), d = Cf - Cn (Foundation's `patch.delta()` is already n(n.d), so its boundary snGrad ignores k) |
 
 **V0 with these options in the binary:** the obstacle case without an `objective` block and with
 `etc/adjointDict` (`ptLosses`), before (`bin-phaseB0`, the binary of the V2 runs) and after:
@@ -278,12 +278,217 @@ right everywhere (cosines 0.994 to 0.99998, no wrong sign), so as ADR-0041 says 
 if at all, `unchecked` and experimental, with finite differences the default; the
 `shape.optimise` part of V3 (gradient: adjoint, solves and minutes against 16 and 84) was not run.
 
+## Phase C: the wall gradient on snapped cells (measured 2026-11-15, evening)
+
+Question: is the remaining V2/V3 error the wall normal derivative on snapped (cut,
+non-orthogonal) wall cells, and is there a wall gradient that is right there?
+
+Scripts (gitignored, `stokes-windows/.local/adjoint-flowsplit/tools`): `wg_lib.py` (OpenFOAM's own
+face/cell centre and volume algorithms, Gauss and least-squares cell gradients, wall-anchored
+fits), `wg_run.py` (every method on a solved case), `wg_table.py`, `pois.py` / `pois.ps1` (exact
+solutions), `wg_check.py` (solver against prototype), `phaseC.ps1`, `tj033.ps1`,
+`phasec_summary.py`. Results in `.local/adjoint-flowsplit/wg/` and `pois/`.
+
+**Method.** shapeSensitivity is an output (it does not feed back into U, Ua), so a wall-gradient
+method can be measured by post-processing the written U and Ua of an already-solved case: the
+primal, the adjoint fields and the finite differences stay exactly as in Phases A and B. The
+prototype reproduces the solver's `uncorrected` and `corrected` shapeSensitivity to 1e-13 (max
+relative, every wall face), so its geometry (face centres, volume centroids) is OpenFOAM's.
+
+### The candidates
+
+s = nu (dU/dn . dUa/dn) on each wall face, dX/dn from:
+
+| Name | dX/dn |
+|---|---|
+| `unc` | (X_w - X_C)/(n.d), d = Cf - C (the solver's default) |
+| `cor` | (X_w - X_C - k.G_C)/(n.d), k = d - n(n.d), G the Gauss linear cell gradient (the solver's `corrected`) |
+| `corL` | as `cor` with G the least-squares gradient of the wall cell: its face neighbours and its boundary faces, the latter at their **true** centres (Cf - C), weights 1/\|d\|^2 (candidate 1 and 2: true cell-centre-to-face vector) |
+| `corLp` | as `corL` with Foundation's normal-projected patch delta for the boundary faces (what `fvc::grad` with `leastSquares` would use) |
+| `cgL` | n . G_C (the least-squares cell gradient itself, at the cell centre) |
+| `fitL` | wall-anchored weighted least squares at Cf, X = G r with X(0) = 0, over the cells sharing a point with the wall cell and their other wall faces (X = 0) |
+| `fitQ` | the same with the full quadratic (9 terms) |
+| `fitE`, `fitE1` | X = eta (g + c eta [+ b . r_t]), zero on the tangent plane |
+| `2pt`, `2ptL` | two-point one-sided normal estimate (candidate 3): the wall cell and the face neighbour furthest along the normal, each moved to the foot of the normal with its Gauss (`2pt`) or least-squares (`2ptL`) gradient, X = g eta + c eta^2 |
+| `+t` | any of these with the normal part of dX/dn removed (zero at a no-slip wall); changes every ratio by under 3 %, not pursued |
+
+### (4) Against exact solutions on snapped meshes
+
+Fully developed laminar flow (incompressibleFluid, linearUpwind, residual 1e-7), snapped by
+snappyHexMesh without layers, wall faces with 50 mm < x < 95 mm compared with the exact wall
+gradient from the outlet flow rate (Re about 67): a Hagen-Poiseuille pipe (R = 5 mm, axis on x,
+from a `searchableCylinder`: cut cells all round a curved wall) and a plane channel (H = 10 mm,
+inclined 15 degrees to the mesh in x-y, from an STL box, symmetry planes in z). `level 1` is a
+1 mm background with the wall cells refined once, as at the T-junction's bumps. Area-weighted
+mean of (dU/dn)/(exact), then of \|dU/dn\|^2/exact^2 ("s", what the sensitivity squares):
+
+| Mesh | `unc` | `cor` | `corL` | `fitL` | `fitQ` | `2pt` | `2ptL` |
+|---|---|---|---|---|---|---|---|
+| pipe 1 mm | 0.991 / 0.984 | 1.041 / 1.088 | **1.007 / 1.015** | 0.949 / 0.904 | 1.033 / 1.067 | 1.092 / 1.196 | 1.032 / 1.065 |
+| pipe 1 mm, level 1 | 0.988 / 0.976 | 1.027 / 1.057 | **0.993 / 0.987** | 0.967 / 0.936 | 1.009 / 1.019 | 1.058 / 1.124 | |
+| pipe 0.5 mm | 1.000 / 1.000 | 1.040 / 1.083 | **1.006 / 1.012** | 0.979 / 0.959 | 1.022 / 1.044 | 1.072 / 1.152 | 1.022 / 1.044 |
+| channel 1 mm | 1.015 / 1.041 | 1.043 / 1.104 | **0.992 / 0.993** | 0.969 / 0.946 | 1.060 / 1.135 | 1.120 / 1.278 | 1.051 / 1.118 |
+| channel 1 mm, level 1 | 1.019 / 1.047 | 1.050 / 1.115 | **1.001 / 1.009** | 0.990 / 0.985 | 1.043 / 1.099 | 1.099 / 1.228 | |
+| channel 0.5 mm | 1.016 / 1.040 | 1.046 / 1.107 | **0.998 / 1.003** | 0.987 / 0.980 | 1.035 / 1.080 | 1.096 / 1.221 | 1.030 / 1.072 |
+
+(`corLp`: pipe 1 mm 1.015 / 1.032, channel 1 mm 0.998 / 1.007, 0.5 mm 1.002 / 1.012. Face RMS
+of the ratio about 1: `corL` 0.020 to 0.073, `unc` 0.020 to 0.089, `cor` 0.054 to 0.115.)
+
+- **`corL` is the accurate one**: within 0.8 % in the gradient and 1.5 % in s on every snapped
+  mesh, curved or inclined, and the smallest face scatter. The Gauss gradient that `corrected`
+  uses is the problem on snapped cells (s 6 to 11 % high): it is not exact for a linear field on
+  a cut cell, least squares is. That is why `corrected` helped the body-fitted case and hurt the
+  snapped one in Phase B.
+- The plain `uncorrected` snGrad is itself only 0 to 5 % off in s here: on snapped walls of this
+  quality the wall gradient alone cannot make a 15 to 25 % error.
+- The higher-order estimates (`fitQ`, `2pt`, `2ptL`) overshoot (s 4 to 28 % high): the
+  second-layer values carry the first-layer interpolation error twice.
+
+### The four verification cases, every method (prototype on the written fields)
+
+Ratio adjoint / central difference (central differences as in V2, V3 and Phase B):
+
+| Method | T 1 mm R1 / R2 | T 0.5 mm R1 / R2 | bf 0.5 mm a1 / a2 | bf 0.33 mm a1 / a2 | manifold h2 / h3 |
+|---|---|---|---|---|---|
+| upwind fields: | | | | | |
+| `unc` (default) | 1.226 / 1.136 | 1.160 / 1.241 | 1.161 / 1.175 | 1.126 / 1.143 | 0.752 / 0.806 |
+| `cor` | 1.311 / 1.177 | 1.245 / 1.332 | 1.036 / 1.058 | 1.031 / 1.056 | 0.771 / 0.826 |
+| `corL` | 1.161 / 1.088 | 1.126 / 1.190 | 0.978 / 1.030 | 1.000 / 1.041 | 0.766 / 0.818 |
+| `cgL` | 0.824 / 0.701 | 0.964 / 0.971 | 0.637 / 0.662 | 0.799 / 0.825 | 0.608 / 0.611 |
+| `fitL` | 1.039 / 0.930 | 1.080 / 1.129 | 0.895 / 0.922 | 0.982 / 0.998 | 0.688 / 0.723 |
+| `fitQ` | 1.503 / 1.395 | 1.291 / 1.420 | 1.106 / 1.343 | 1.142 / 1.253 | 0.867 / 0.957 |
+| `2pt` | 1.713 / 1.635 | 1.444 / 1.610 | 1.294 / 1.360 | 1.196 / 1.243 | 0.877 / 0.969 |
+| linearUpwind fields: | | | | | |
+| `unc` | 1.166 / 1.111 | 1.057 / 1.142 | 1.165 / 1.164 | 1.120 / 1.118 | 0.782 / 0.826 |
+| `cor` | 1.255 / 1.153 | 1.136 / 1.228 | 1.033 / 1.042 | 1.021 / 1.030 | 0.802 / 0.847 |
+| `corL` | 1.116 / 1.071 | 1.030 / 1.100 | 0.973 / 1.013 | 0.990 / 1.016 | 0.796 / 0.839 |
+| `corLp` | | 1.038 / 1.111 | 1.043 / 1.059 | | |
+| `fitL` | 1.016 / 0.924 | 1.003 / 1.059 | 0.914 / 0.930 | 0.989 / 0.990 | 0.716 / 0.742 |
+| `fitQ` | 1.409 / 1.358 | 1.149 / 1.284 | 1.071 / 1.289 | 1.105 / 1.194 | 0.901 / 0.980 |
+| `2pt` / `2ptL` | 1.586 / 1.574 | 1.283 / 1.449, 2ptL 1.133 / 1.267 | 1.258 / 1.306 | 1.163 / 1.188 | 0.911 / 0.992 |
+
+Cosines 0.983 to 1.000 throughout (h4 inconclusive, left out as in V3). The sensitivity on the
+T-junction bumps comes from the upper half of each cap (90 %); the bump-to-wall corner ring
+carries under 1.2 %, and weighting each face by the exact sphere normal velocity (n_sphere .
+n_face) instead of 1 changes dJ/dR by under 0.03 %.
+
+- No method fixes all four. The methods that are accurate on the exact solutions (`corL`,
+  `unc`, then `cor` on body-fitted cells) leave the T-junction high and the manifold low; the
+  methods that bring one case to 1 do it by an error the Poiseuille test shows (`cgL`, `fitL`
+  low by 5 to 20 % in s; `fitQ`, `2pt` high), and break another case (`fitQ` brings the manifold
+  to 0.90 / 0.98 and puts the T-junction at 1.41 / 1.36).
+- Since s on the T-junction and the manifold moves by only 3 to 5 % between `unc` and `corL`,
+  while the exact solutions say `corL` is right to 1.5 %, **most of the T-junction's +7 to +24 %
+  and the manifold's -16 to -25 % is not the wall gradient**: it is in U and Ua themselves (the
+  adjoint convection and ATC discretisation, resolution of the adjoint boundary layer on 2 to 4 mm
+  bumps meshed at 0.25 to 0.5 mm, the manifold's 1 mm cells) or in the finite differences of a
+  remeshed snapped geometry, which Phase C did not separate.
+
+### `sensitivityWallGradient leastSquares` (solver option, opt-in)
+
+`corL` in the solver (`wallCellGrad.H`, `shapeSensitivity.H`): for each wall face, the wall
+cell's least-squares gradient over its faces (internal neighbours; coupled neighbours with the
+coupled delta and neighbour value; other boundary faces at Cf - C with their face value; empty
+directions closed), then (X_w - X_C - k.G)/(n.d). Same validation as the other keys: `uncorrected`,
+`corrected`, `leastSquares`, anything else refused.
+
+- **Solver against prototype:** max \|s_solver - s_prototype\| / max\|s\| = 8e-14 to 9e-14
+  (T 1 mm, both convections), 2e-14 (body-fitted 0.5 mm), 1.3e-13 (T 0.33 mm), 3.6e-8 on the
+  manifold (its fields are written with 8 digits), on every wall face. U and Ua are
+  byte-for-byte those of the reference runs (shapeSensitivity does not feed back), so the
+  body-fitted 0.33 mm row below is the prototype's (its solver runs were stopped to free the
+  machine).
+- **V0:** the new binary against the one before it (`bin-phaseC0`), no new key: the obstacle
+  case without `objective` and with `ptLosses`, the snapped T-junction 1 mm and the body-fitted
+  1 mm flow split: every field of the last time, `objective.dat` byte-identical, logs identical
+  except the clock lines.
+
+The solver's own ratios with the option (cases `<prefix>ls-base`, `<prefix>luls-base`; same
+primal as the reference, so the same central differences), against the earlier defaults:
+
+| Case (conclusive components) | default (upwind, uncorrected) | linearUpwind | leastSquares | **linearUpwind + leastSquares** | cosine (last) |
+|---|---|---|---|---|---|
+| T-junction snapped 1 mm, R1 / R2 | 1.226 / 1.136 | 1.166 / 1.111 | 1.161 / 1.088 | **1.117 / 1.071** | 0.99995 |
+| T-junction snapped 0.5 mm, R1 / R2 | 1.160 / 1.241 | 1.057 / 1.143 | 1.126 / 1.191 | **1.030 / 1.1005** | 0.99987 |
+| T-junction snapped 0.33 mm, R1 / R2 | 1.134 / 1.165 | 1.045 / 1.074 | 1.109 / 1.134 | **1.023 / 1.048** | 0.99998 |
+| body-fitted 1 mm, a1 / a2 | 1.050 / 0.996 | 1.117 / 1.043 | 0.815 / 0.818 | **0.859 / 0.851** | 0.99999 |
+| body-fitted 0.5 mm, a1 / a2 | 1.161 / 1.175 | 1.165 / 1.164 | 0.978 / 1.030 | **0.973 / 1.013** | 0.99981 |
+| body-fitted 0.33 mm, a1 / a2 | 1.126 / 1.143 | 1.120 / 1.118 | 1.000 / 1.041 | **0.990 / 1.016** | 0.99993 |
+| manifold snapped 1 mm, h2 / h3 | 0.752 / 0.806 | 0.782 / 0.826 | 0.766 / 0.818 | **0.796 / 0.839** | 0.9997 (0.995 with h4) |
+
+(Manifold h4 stays inconclusive at 1.69 to 1.74. Every run converged, 329 iterations for the
+manifold, as the references.)
+
+The 0.33 mm row is new (`tj033.ps1`): the snapped T-junction of V2 with 0.33 mm background cells
+(363,814 cells; bumps at level 1), R1 and R2 stepped by +-0.125 mm, 620 to 628 iterations each,
+J = 2.4908e-3. Central differences 4.3432 / -1.0882 (forward / backward 4.700 / 3.986 and
+-1.143 / -1.033: within 16 % and 10 % of central, so conclusive by that test; signals 1.1e-3
+and 2.7e-4 in J; the noise floor was **not** measured at this mesh, no repeat or tiny step,
+where at 0.5 mm it was 1/415 of the R2 signal). The base was solved with linearUpwind +
+leastSquares; the uncorrected and corrected numbers on the same fields are the prototype's,
+and the default column a second solve of the same mesh with upwind (621 iterations; its
+leastSquares column is the prototype on those fields).
+
+- leastSquares is the best wall gradient wherever it can be judged against an exact answer, and
+  with linearUpwind it is the best combination on the snapped T-junction and on the
+  body-fitted bump from 0.5 mm on: the body-fitted bump converges onto 1 (0.97 / 1.01 at 0.5 mm,
+  0.99 / 1.02 at 0.33 mm), and the snapped T-junction comes in with refinement, R1 1.117 ->
+  1.030 -> 1.023 and R2 1.071 -> 1.1005 -> 1.048, cosine 0.99998 at 0.33 mm. So on the snapped
+  T-junction R2's "error grows with refinement" of V2 turns at 0.33 mm, for every setting: the
+  default goes 1.136 -> 1.241 -> 1.165 (R1 1.226 -> 1.160 -> 1.134); on the linearUpwind fields
+  at 0.33 mm uncorrected gives 1.045 / 1.074 and corrected 1.118 / 1.140. linearUpwind is worth
+  7 to 10 % there and leastSquares 2 to 3 %: again, the wall gradient is the smaller term.
+- It does **not** bring all four cases into [0.9, 1.1]: the snapped T-junction at 1 mm has R1
+  1.117, at 0.5 mm R2 1.1005 (on the edge), and the manifold is 0.796 / 0.839 (its h2 just
+  below V3's 0.8). The body-fitted case at 1 mm (4 cells across the bump's half width) drops to
+  0.86 / 0.85 with the right gradient, where the uncorrected snGrad's error had cancelled the
+  field error (1.05 / 1.00).
+
+### Decision and verdict
+
+**No default changes.** The rule set for this phase was: make leastSquares (and linearUpwind)
+the flow-split objective's default only if it brings every conclusive ratio of the four cases
+(snapped T-junction 1 and 0.5 mm, body-fitted bump, manifold 1 mm) into [0.9, 1.1]. It does not
+(T 1 mm R1 1.117, T 0.5 mm R2 1.1005, manifold 0.796 / 0.839, body-fitted 1 mm 0.86 / 0.85), so
+`sensitivityWallGradient` stays `uncorrected` by default, `objective { convection }` stays
+`fvSchemes`, and the case Stokes compiles behaves exactly as before (V0 above).
+`leastSquares` is kept as an opt-in option because it is the accurate wall gradient; anyone
+using the adjoint gradient by hand should prefer linearUpwind + leastSquares.
+
+What Phase C settles:
+
+1. The wall normal derivative on snapped cells is **not** the main error. The plain snGrad is
+   within 0 to 5 % in s of the exact wall shear on snapped pipe and channel meshes, the
+   least-squares-corrected one within 1.5 %, and on the verification cases the two differ by
+   only 3 to 5 %. Phase B's `corrected` hurt snapped meshes because its Gauss cell gradient is
+   wrong on cut cells (s 6 to 11 % high on the exact solutions), not because a corrected wall
+   gradient is the wrong idea.
+2. The rest is in the fields (and possibly in finite differences of remeshed snapped geometry),
+   and it shrinks with mesh refinement on the T-junction: with linearUpwind + leastSquares the
+   ratios are 1.12 / 1.07, 1.03 / 1.10, 1.02 / 1.05 at 1, 0.5, 0.33 mm. The manifold's 1 mm mesh
+   (-20 %) is the coarsest case relative to its features and was not refined here.
+
+**Verdict under ADR-0041: still not adjoint-verified.**
+
+| Gate | As Stokes compiles it (default) | With linearUpwind + leastSquares (opt-in) |
+|---|---|---|
+| V2 signs, conclusive, 0.5 mm in [0.8, 1.25], cosine >= 0.95 | pass (1.160 / 1.241) | pass (1.030 / 1.1005, cosine 0.9999) |
+| V2 \|ratio - 1\| at 0.5 mm not larger than at 1 mm | fail (R2 0.136 -> 0.241) | **fail** (R2 0.071 -> 0.1005; R1 0.117 -> 0.030); at 0.33 mm R2 is back to 0.048, but that mesh is not in the gate |
+| V3 conclusive rows in [0.8, 1.25], cosine >= 0.95 | fail (h2 0.752) | **fail** (h2 0.796, h3 0.839; cosine 0.9997 on the two, h4 inconclusive) |
+| V3 `shape.optimise` part | not run | not run |
+
+The direction is right everywhere (cosines >= 0.994, no wrong sign, 0.9999+ on the T-junction),
+so ADR-0041's shipping rule stands: the flow split's adjoint is experimental and `unchecked`,
+finite differences the default.
+
 ## Not done here
 
 - `shape.check` / `shape.optimise` with `gradient: adjoint` on the manifold through Stokes (the
   host has no `adjointFoam` beside the install, and the agent side was being changed).
-- A finer snapped T-junction (0.33 mm), and the T-junction with boundary layers, to see whether
-  the snapped R2 trend turns.
-- A wall gradient that is right on snapped cells (least squares), or ESI's E-SI surface formula
-  (roadmap step 4); then (a) + (b) as the objective path's default if V2 and V3 pass with it.
-- `startIteration`, parallel runs, turbulent cases.
+- The T-junction with boundary layers.
+- Separating the remaining error between the adjoint fields (ATC and convection discretisation,
+  adjoint boundary-layer resolution) and the finite differences of remeshed snapped geometry:
+  e.g. a discrete-adjoint-consistent check, or the snapped T-junction at 0.25 mm.
+- ESI's E-SI surface formula (roadmap step 4).
+- `startIteration`, parallel runs (the leastSquares wall gradient handles coupled faces but was
+  run serial only), turbulent cases.

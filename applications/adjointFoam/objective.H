@@ -50,13 +50,17 @@ string objectiveConvection("fvSchemes");
 
 // The wall gradient of shapeSensitivity (adjointControls.H): uncorrected unless asked for, on
 // both paths. Corrected fixed the body-fitted T-junction but made the snapped one worse
-// (tests/flowsplit.md, Phase B).
+// (tests/flowsplit.md, Phase B). leastSquares is the most accurate on snapped and body-fitted
+// walls against exact Poiseuille gradients, but with linearUpwind it still leaves the manifold
+// at 0.80 / 0.84 and the 1 mm T-junction's R1 at 1.12 against finite differences, so it is
+// not the default either (Phase C).
 if (sensitivityWallGradient == "default")
 {
     sensitivityWallGradient = "uncorrected";
 }
 const bool sensitivityCorrected = (sensitivityWallGradient == "corrected");
-if (flowRatePartition || sensitivityCorrected)
+const bool sensitivityLeastSquares = (sensitivityWallGradient == "leastSquares");
+if (flowRatePartition || sensitivityCorrected || sensitivityLeastSquares)
 {
     Info<< "shapeSensitivity wall gradient: " << sensitivityWallGradient << nl << endl;
 }

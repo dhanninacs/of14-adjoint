@@ -27,7 +27,8 @@ License
     and a selectable objective: the total-pressure loss (default) or the
     flow-rate partition between outlets (objective.H, objectiveUpdate.H and
     the objectiveOutletPressure/objectiveOutletVelocity conditions, after
-    ESI's objectiveFlowRatePartition and adjoint outlet conditions).
+    ESI's objectiveFlowRatePartition and adjoint outlet conditions), and
+    selectable wall gradients for the shape sensitivity (wallCellGrad.H).
 
 Application
     adjointFoam
@@ -67,6 +68,7 @@ Description
 #include "fvConstraints.H"
 
 #include "wallFvPatch.H"
+#include "emptyFvPatch.H"
 #include "localMin.H"
 #include "fvcAverage.H"
 #include "zeroGradientFvPatchFields.H"
@@ -105,6 +107,11 @@ inline void zeroCells
         vf[cells[i]] = Zero;
     }
 }
+
+
+// of14-adjoint: the least-squares gradient in the cells next to a patch, for
+// sensitivityWallGradient leastSquares (shapeSensitivity.H)
+#include "wallCellGrad.H"
 
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //

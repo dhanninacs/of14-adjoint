@@ -5,7 +5,8 @@
 // boundary conditions encode.
 //
 // shapeSensitivity, on each wall face: s = nuEff (dU/dn) . (dUa/dn), with n the face normal out of
-// the fluid and the normal derivatives OpenFOAM's own boundary snGrad. It is the change of J per
+// the fluid and the normal derivatives OpenFOAM's own boundary snGrad by default
+// (sensitivityWallGradient: corrected and leastSquares below). It is the change of J per
 // unit area and per unit displacement of the wall along n (Othmer 2008, frozen turbulence). The
 // sign was fixed against finite differences of J (Stokes ADR-0038): moving a wall out of the fluid
 // lowers the loss, so s < 0 there.
@@ -60,7 +61,36 @@
     {
         const volScalarField nuEff(turbulence->nuEff());
         volScalarField::Boundary& sb = shapeSensitivity.boundaryFieldRef();
-        if (!sensitivityCorrected)
+        if (sensitivityLeastSquares)
+        {
+            // As "corrected" below, with the wall cell's gradient from least squares over its
+            // face neighbours and its boundary faces at their true centres (wallCellGrad.H):
+            // exact for a linear field on any cell shape, where the Gauss gradient of a snapped
+            // wall cell is not (tests/flowsplit.md, Phase C).
+            forAll(mesh.boundary(), patchi)
+            {
+                const fvPatch& patch = mesh.boundary()[patchi];
+                if (isA<wallFvPatch>(patch))
+                {
+                    const vectorField nf(patch.nf());
+                    const vectorField d(patch.Cf() - patch.Cn());
+                    const scalarField nd(max(nf & d, small*mag(d)));
+                    const vectorField k(d - nf*(nf & d));
+                    const fvPatchVectorField& Up = U.boundaryField()[patchi];
+                    const fvPatchVectorField& Uap = Ua.boundaryField()[patchi];
+                    const vectorField snU
+                    (
+                        (Up - Up.patchInternalField() - (k & wallCellGrad(U, patchi)))/nd
+                    );
+                    const vectorField snUa
+                    (
+                        (Uap - Uap.patchInternalField() - (k & wallCellGrad(Ua, patchi)))/nd
+                    );
+                    sb[patchi] = nuEff.boundaryField()[patchi]*(snU & snUa);
+                }
+            }
+        }
+        else if (!sensitivityCorrected)
         {
             forAll(mesh.boundary(), patchi)
             {

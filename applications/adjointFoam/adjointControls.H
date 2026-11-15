@@ -21,8 +21,10 @@ const bool porosity = adjointDict.lookupOrDefault<Switch>("porosity", false);
 
 // The wall gradient in shapeSensitivity (shapeSensitivity.H): "uncorrected" is OpenFOAM's
 // boundary snGrad, (X_w - X_c)/(n & d) (the pressure-loss path, unchanged); "corrected" first
-// moves the cell value to the foot of the face normal with the cell gradient, for
-// non-orthogonal wall cells. The default is set by objective.H.
+// moves the cell value to the foot of the face normal with the cell gradient (fvc::grad, the
+// case's gradSchemes), for non-orthogonal wall cells; "leastSquares" does the same with a
+// least-squares gradient of the wall cell that uses the wall values at the true face centres
+// (wallCellGrad.H), which is right on snapped cells as well. The default is set by objective.H.
 word sensitivityWallGradient
 (
     adjointDict.lookupOrDefault<word>("sensitivityWallGradient", "default")
@@ -32,11 +34,12 @@ if
     sensitivityWallGradient != "default"
  && sensitivityWallGradient != "uncorrected"
  && sensitivityWallGradient != "corrected"
+ && sensitivityWallGradient != "leastSquares"
 )
 {
     FatalIOErrorInFunction(adjointDict)
         << "sensitivityWallGradient " << sensitivityWallGradient
-        << "; use uncorrected or corrected" << exit(FatalIOError);
+        << "; use uncorrected, corrected or leastSquares" << exit(FatalIOError);
 }
 
 // The inlets: every patch that is not a wall or a constraint and on which U is fixed by a plain

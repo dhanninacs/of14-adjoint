@@ -15,7 +15,9 @@ porosity    false;
 sensitivity true;
 
 // The wall gradients in shapeSensitivity: uncorrected (OpenFOAM's boundary snGrad) or corrected
-// (taken along the face normal on non-orthogonal wall cells; see tests/flowsplit.md, Phase B).
+// (taken along the face normal on non-orthogonal wall cells with the Gauss cell gradient; see
+// tests/flowsplit.md, Phase B) or leastSquares (the same with the wall cell's least-squares
+// gradient, accurate on snapped cells as well; Phase C).
 // sensitivityWallGradient uncorrected;
 
 // The objective (objective.H). Absent, or type ptLosses: the Foundation solver's total-pressure
