@@ -90,6 +90,7 @@ const dimensionedScalar zeroAlpha("0", dimensions::rate, 0.0);
 
 #include "adjointControls.H"
 #include "ATC.H"
+#include "objective.H"
 
 // of14-adjoint: lambda and alphaMax are read only when the porosity update is on.
 dimensionedScalar lambda("lambda", inv(dimensions::kinematicViscosity), 0);

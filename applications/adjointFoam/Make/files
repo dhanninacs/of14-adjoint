@@ -1,5 +1,7 @@
 adjointOutletPressure/adjointOutletPressureFvPatchScalarField.C
 adjointOutletVelocity/adjointOutletVelocityFvPatchVectorField.C
+objectiveOutletPressure/objectiveOutletPressureFvPatchScalarField.C
+objectiveOutletVelocity/objectiveOutletVelocityFvPatchVectorField.C
 adjointFoam.C
 
 EXE = ../../bin/adjointFoam

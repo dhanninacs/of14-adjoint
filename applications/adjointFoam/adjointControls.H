@@ -46,14 +46,14 @@ labelList inletCells;
 Info<< "Inlet cells (ATC zeroed, porosity kept off): "
     << returnReduce(inletCells.size(), sumOp<label>()) << nl << endl;
 
-// The objective's output: postProcessing/adjoint/0/objective.dat, one row per iteration.
+// The objective's output: postProcessing/adjoint/0/objective.dat, one row per iteration (its
+// header is written by objective.H, which knows the objective).
 autoPtr<OFstream> objectiveFile;
 if (Pstream::master())
 {
     const fileName dir(runTime.path()/"postProcessing"/"adjoint"/runTime.name());
     mkDir(dir);
     objectiveFile.reset(new OFstream(dir/"objective.dat"));
-    objectiveFile() << "# Time  J (total-pressure power loss, kinematic: m^5/s^3)" << endl;
 }
 
 // The wall shape sensitivity (shapeSensitivity.H): zero inside, written with the other fields.

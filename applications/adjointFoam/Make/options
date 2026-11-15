@@ -1,6 +1,8 @@
 EXE_INC = \
     -IadjointOutletPressure \
     -IadjointOutletVelocity \
+    -IobjectiveOutletPressure \
+    -IobjectiveOutletVelocity \
     -I$(LIB_SRC)/MomentumTransportModels/momentumTransportModels/lnInclude \
     -I$(LIB_SRC)/MomentumTransportModels/incompressible/lnInclude \
     -I$(LIB_SRC)/MomentumTransportModels/compressible/lnInclude \

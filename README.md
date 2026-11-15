@@ -11,8 +11,17 @@ OpenFOAM Foundation or OpenCFD Ltd. OPENFOAM® is a registered trade mark of Ope
 
 ## What it does
 
-`adjointFoam` solves a steady incompressible flow (SIMPLE) and its continuous adjoint for the
-total-pressure loss between inlets and outlets (Othmer 2008), and writes:
+`adjointFoam` solves a steady incompressible flow (SIMPLE) and its continuous adjoint for one of
+two objectives, chosen by `objective { type ...; }` in `system/adjointDict`:
+
+- `ptLosses` (the default, and what runs when there is no `objective` block): the total-pressure
+  loss between inlets and outlets (Othmer 2008), with the Foundation's outlet conditions;
+- `flowRatePartition`: J = Σᵢ (Qᵢ/Q − Tᵢ)² over chosen outlets (Q their summed flux, Tᵢ = 1/N by
+  default), with the outlet conditions `objectiveOutletPressure` and `objectiveOutletVelocity`
+  after ESI's and Ua = 0 at the inlets (laminar, measured against finite differences in
+  [tests/flowsplit.md](tests/flowsplit.md));
+
+and writes:
 
 - `U`, `p`, `Ua`, `pa` as usual;
 - **`shapeSensitivity`** on every wall patch: the change of the objective per unit area and per unit
@@ -28,7 +37,8 @@ Compared with the Foundation solver it starts from:
 | Adjoint transpose convection | always the full term (diverges on a turbulent pitzDaily without porosity) | `ATC` choice from ESI: `UaGradU` (default, the same term), `standard`, `cancel`, with ESI's limiter next to chosen patch types: `zeroATCPatchTypes (patch)` makes that case stable ([tests/atc.md](tests/atc.md)) |
 | Wall sensitivity | none | `shapeSensitivity` written per wall face |
 | Inlets | a patch named `inlet` | every non-wall patch with a plain fixed-value U |
-| Inlet adjoint velocity | as given | as given (the pressure-loss objective wants `-U_in`) |
+| Inlet adjoint velocity | as given | as given (the pressure-loss objective wants `-U_in`; the flow-rate objective `0`, checked) |
+| Objective | total-pressure loss, hard-coded in the outlet conditions | `ptLosses` (the same) or `flowRatePartition` (ESI's, with its outlet conditions) |
 
 Settings: `system/adjointDict`, every entry optional ([etc/adjointDict](etc/adjointDict)). The plan for the ESI merge, in order, is in [ROADMAP.md](ROADMAP.md).
 
@@ -36,7 +46,8 @@ Settings: `system/adjointDict`, every entry optional ([etc/adjointDict](etc/adjo
 
 ```bash
 # Windows binaries, from Linux or WSL, against a built FoamWin tree:
-FOAMWIN_SRC=~/foamwin-clean/OpenFOAM-14 bash build.sh      # -> bin/adjointFoam.exe
+FOAMWIN_SRC=~/foamwin-clean/OpenFOAM-14 bash /path/to/of14-adjoint/build.sh   # -> bin/adjointFoam.exe
+# (call build.sh by a path with a slash: it finds its directory from $0)
 ```
 
 Copy `bin/adjointFoam.exe` beside the install's other solvers. On Linux, source an OpenFOAM 14

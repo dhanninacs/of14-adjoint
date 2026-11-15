@@ -23,7 +23,11 @@ License
 
     Modified by of14-adjoint (GPL-3.0-or-later): shape sensitivity on the walls, the objective
     logged, porosity optional, inlets found by their condition, and ESI's adjoint transpose
-    convection forms and limiter (ATC.H, from OpenFOAM v2xxx; see NOTICE.md).
+    convection forms and limiter (ATC.H, from OpenFOAM v2xxx; see NOTICE.md),
+    and a selectable objective: the total-pressure loss (default) or the
+    flow-rate partition between outlets (objective.H, objectiveUpdate.H and
+    the objectiveOutletPressure/objectiveOutletVelocity conditions, after
+    ESI's objectiveFlowRatePartition and adjoint outlet conditions).
 
 Application
     adjointFoam
@@ -67,8 +71,11 @@ Description
 #include "fvcAverage.H"
 #include "zeroGradientFvPatchFields.H"
 #include "mixedFvPatchFields.H"
+#include "directionMixedFvPatchFields.H"
 #include "OFstream.H"
 #include "OSspecific.H"
+#include "objectiveOutletPressureFvPatchScalarField.H"
+#include "objectiveOutletVelocityFvPatchVectorField.H"
 
 #include "fvcDdt.H"
 #include "fvcGrad.H"
@@ -200,6 +207,10 @@ int main(int argc, char *argv[])
             U.correctBoundaryConditions();
             fvConstraints.constrain(U);
         }
+
+        // of14-adjoint: the flow-rate objective's outlet sources from this
+        // iteration's flux (nothing without objective { type flowRatePartition; })
+        #include "objectiveUpdate.H"
 
         // Adjoint Pressure-velocity SIMPLE corrector
         {

@@ -14,6 +14,26 @@ porosity    false;
 // Write shapeSensitivity on the walls and log the objective each iteration.
 sensitivity true;
 
+// The objective (objective.H). Absent, or type ptLosses: the Foundation solver's total-pressure
+// loss, with adjointOutletPressure/adjointOutletVelocity at the outlets and Ua = -U_in at the
+// inlets, exactly as before this block existed.
+//
+// flowRatePartition: J = sum_i (Q_i/Q - T_i)^2 over the chosen outlets (Q = their summed flux).
+// The case then needs, on each of those outlets,
+//     Ua { type objectiveOutletVelocity; value uniform (0 0 0); }
+//     pa { type objectiveOutletPressure; value uniform 0; }
+// and Ua = (0 0 0) fixed at the inlets (J does not depend on p); the solver refuses otherwise.
+// objective.dat then has J, the outlet fractions and dJ/dQ_i per iteration.
+objective
+{
+    type             ptLosses;     // ptLosses (default) | flowRatePartition
+    // outletPatches    (out1 out2);  // flowRatePartition: >= 2 patch names
+    // targetFractions  ();           // optional, default 1/N each, in patch-index order
+    // viscousTerm      true;         // nuEff d(Ua_n)/dn in the outlet pa
+    // tangential       robin;        // robin | zero  (outlet Ua_t)
+    // startIteration   0;            // the outlet source is held at 0 before this iteration
+}
+
 // The adjoint transpose convection (ESI's ATCModel, see ATC.H).
 ATC
 {

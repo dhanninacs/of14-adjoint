@@ -10,23 +10,48 @@
 // sign was fixed against finite differences of J (Stokes ADR-0038): moving a wall out of the fluid
 // lowers the loss, so s < 0 there.
 
+//
+// With the flowRatePartition objective (objective.H), J is the flow-split J of the last
+// objectiveUpdate.H (the same phi: the primal is not solved again in between), and objective.dat
+// also carries the outlet fractions and dJ/dQ_i. The wall formula is the same for both.
+
 {
     scalar J = 0;
-    forAll(mesh.boundary(), patchi)
+    if (flowRatePartition)
     {
-        const fvPatch& patch = mesh.boundary()[patchi];
-        if (isA<wallFvPatch>(patch) || patch.constraint())
+        J = objectiveJ;
+        if (objectiveFile.valid())
         {
-            continue;
+            objectiveFile() << runTime.userTimeName() << tab << J;
+            forAll(objectiveFractions, i)
+            {
+                objectiveFile() << tab << objectiveFractions[i];
+            }
+            forAll(objectiveDJdQ, i)
+            {
+                objectiveFile() << tab << objectiveDJdQ[i];
+            }
+            objectiveFile() << endl;
         }
-        const vectorField& Up = U.boundaryField()[patchi];
-        const scalarField& pp = p.boundaryField()[patchi];
-        J -= sum((pp + 0.5*magSqr(Up))*(Up & patch.Sf()));
     }
-    reduce(J, sumOp<scalar>());
-    if (objectiveFile.valid())
+    else
     {
-        objectiveFile() << runTime.userTimeName() << tab << J << endl;
+        forAll(mesh.boundary(), patchi)
+        {
+            const fvPatch& patch = mesh.boundary()[patchi];
+            if (isA<wallFvPatch>(patch) || patch.constraint())
+            {
+                continue;
+            }
+            const vectorField& Up = U.boundaryField()[patchi];
+            const scalarField& pp = p.boundaryField()[patchi];
+            J -= sum((pp + 0.5*magSqr(Up))*(Up & patch.Sf()));
+        }
+        reduce(J, sumOp<scalar>());
+        if (objectiveFile.valid())
+        {
+            objectiveFile() << runTime.userTimeName() << tab << J << endl;
+        }
     }
     Info<< "Objective J = " << J << nl;
 
